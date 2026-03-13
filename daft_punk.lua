@@ -12,6 +12,7 @@
 -- - DJ transition: K1+K3 initiates smooth crossfade between songs over 8 bars
 -- - Arp pool increased to 16 notes (from 10)
 -- - Warning toast when pool is full
+-- - Screen redesign: beat_phase, popup system, brightness hierarchy
 
 engine.name = "MollyThePoly"
 
@@ -111,44 +112,44 @@ local DB = {
 --  MUSIC THEORY
 -- ============================================================
 local CHORD_SHAPES = {
-  [\"\"]     = {0,4,7},
-  [\"m\"]    = {0,3,7},
-  [\"5\"]    = {0,7},
-  [\"7\"]    = {0,4,7,10},
-  [\"maj7\"] = {0,4,7,11},
-  [\"m7\"]   = {0,3,7,10},
-  [\"dim\"]  = {0,3,6},
-  [\"dim7\"] = {0,3,6,9},
-  [\"aug\"]  = {0,4,8},
-  [\"sus2\"] = {0,2,7},
-  [\"sus4\"] = {0,5,7},
-  [\"add9\"] = {0,4,7,14},
-  [\"9\"]    = {0,4,7,10,14},
-  [\"6\"]    = {0,4,7,9},
-  [\"m6\"]   = {0,3,7,9},
-  [\"maj9\"] = {0,4,7,11,14},
-  [\"m9\"]   = {0,3,7,10,14},
+  [""]     = {0,4,7},
+  ["m"]    = {0,3,7},
+  ["5"]    = {0,7},
+  ["7"]    = {0,4,7,10},
+  ["maj7"] = {0,4,7,11},
+  ["m7"]   = {0,3,7,10},
+  ["dim"]  = {0,3,6},
+  ["dim7"] = {0,3,6,9},
+  ["aug"]  = {0,4,8},
+  ["sus2"] = {0,2,7},
+  ["sus4"] = {0,5,7},
+  ["add9"] = {0,4,7,14},
+  ["9"]    = {0,4,7,10,14},
+  ["6"]    = {0,4,7,9},
+  ["m6"]   = {0,3,7,9},
+  ["maj9"] = {0,4,7,11,14},
+  ["m9"]   = {0,3,7,10,14},
 }
 
 local NOTE_SEMI = {
-  C=0,[\"C#\"]=1,Db=1,D=2,[\"D#\"]=3,Eb=3,
-  E=4,F=5,[\"F#\"]=6,Gb=6,G=7,
-  [\"G#\"]=8,Ab=8,A=9,[\"A#\"]=10,Bb=10,B=11
+  C=0,["C#"]=1,Db=1,D=2,["D#"]=3,Eb=3,
+  E=4,F=5,["F#"]=6,Gb=6,G=7,
+  ["G#"]=8,Ab=8,A=9,["A#"]=10,Bb=10,B=11
 }
 
-local NOTE_NAMES = {\"C\",\"C#\",\"D\",\"D#\",\"E\",\"F\",\"F#\",\"G\",\"G#\",\"A\",\"A#\",\"B\"}
+local NOTE_NAMES = {"C","C#","D","D#","E","F","F#","G","G#","A","A#","B"}
 
 local function midi_to_hz(n)
   return 440.0 * (2.0 ^ ((n - 69) / 12.0))
 end
 
 local function chord_to_midi(str, oct)
-  if not str or str == \"\" then return {} end
-  local root, qual = str:match(\"^([A-G][b#]?)(.*)$\")
+  if not str or str == "" then return {} end
+  local root, qual = str:match("^([A-G][b#]?)(.*)$")
   if not root then return {} end
   local semi = NOTE_SEMI[root]
   if semi == nil then return {} end
-  local shape = CHORD_SHAPES[qual] or CHORD_SHAPES[\"\"]
+  local shape = CHORD_SHAPES[qual] or CHORD_SHAPES[""]
   local base  = (oct + 1) * 12 + semi
   local out   = {}
   for _, iv in ipairs(shape) do
@@ -165,9 +166,9 @@ end
 -- ============================================================
 --  CONSTANTS
 -- ============================================================
-local ARP_STYLES    = {\"UP\",\"DN\",\"U+D\",\"RND\",\"DRNK\",\"BRST\"}
+local ARP_STYLES    = {"UP","DN","U+D","RND","DRNK","BRST"}
 local ARP_DIVS      = {1/32, 1/16, 1/12, 1/8, 1/6, 1/4, 1/2, 1}
-local ARP_DIV_NAMES = {\"1/32\",\"1/16\",\"1/12\",\"1/8\",\"1/6\",\"1/4\",\"1/2\",\"1\"}
+local ARP_DIV_NAMES = {"1/32","1/16","1/12","1/8","1/6","1/4","1/2","1"}
 local ARP_MAX       = 16  -- ENHANCED: increased from 10 to 16
 
 local CHORD_COLS      = 7
@@ -201,6 +202,13 @@ local state = {
   transition_progress = 0,  -- 0-1
   transition_total_bars = 8,
   pool_full_flash = 0,  -- display warning when pool is full
+  
+  -- NEW: Screen state vars
+  beat_phase = 0,      -- 0-3 for beat tracking
+  popup_param = nil,   -- popup category
+  popup_val = nil,     -- popup value
+  popup_time = 0,      -- popup display timer
+  screen_clock_counter = 0,
 }
 
 -- ============================================================
@@ -217,9 +225,9 @@ local function clamp(v,lo,hi) return math.max(lo, math.min(hi, v)) end
 -- ============================================================
 local function sound_on(n)
   if state.sounding[n] then return end
-  engine.note_on(midi_to_hz(n), params:get(\"amp\"))
+  engine.note_on(midi_to_hz(n), params:get("amp"))
   if midi_out then
-    midi_out:note_on(n, params:get(\"velocity\"), params:get(\"midi_ch\"))
+    midi_out:note_on(n, params:get("velocity"), params:get("midi_ch"))
   end
   state.sounding[n] = true
 end
@@ -228,7 +236,7 @@ local function sound_off(n)
   if not state.sounding[n] then return end
   engine.note_off(midi_to_hz(n))
   if midi_out then
-    midi_out:note_off(n, 0, params:get(\"midi_ch\"))
+    midi_out:note_off(n, 0, params:get("midi_ch"))
   end
   state.sounding[n] = nil
 end
@@ -236,7 +244,7 @@ end
 local function silence_all()
   for n, _ in pairs(state.sounding) do
     engine.note_off(midi_to_hz(n))
-    if midi_out then midi_out:note_off(n, 0, params:get(\"midi_ch\")) end
+    if midi_out then midi_out:note_off(n, 0, params:get("midi_ch")) end
   end
   state.sounding = {}
 end
@@ -259,7 +267,7 @@ local function rebuild_pool()
           if rm[row] then
             if col <= CHORD_COLS then
               -- chord col: expand
-              for _, n in ipairs(chord_to_midi(chords[col] or \"\", state.octave)) do
+              for _, n in ipairs(chord_to_midi(chords[col] or "", state.octave)) do
                 if not seen[n] and #pool < ARP_MAX then
                   seen[n] = true; table.insert(pool, n)
                 end
@@ -316,9 +324,6 @@ local function transition(from_idx, to_idx, bars)
     while elapsed < total_time and state.transition_active do
       state.transition_progress = math.min(1, elapsed / total_time)
       
-      -- Blend chord progressions smoothly
-      -- For now, visual indicator; audio crossfade logic would integrate here
-      
       elapsed = elapsed + 0.1
       clock.sleep(0.1)
     end
@@ -360,7 +365,7 @@ local function arp_next(style, pool, step)
     return pool[nxt], nxt
 
   elseif style == 6 then                      -- BURST: signal
-    return \"BURST\", step
+    return "BURST", step
   end
 end
 
@@ -408,22 +413,172 @@ local function arp_kill()
 end
 
 -- ============================================================
---  GLITCH HELPER
+--  SCREEN REDRAW
 -- ============================================================
-local GMAP = { A=\"4\",E=\"3\",O=\"0\",I=\"1\",T=\"7\",a=\"@\",e=\"3\",o=\"0\",s=\"$\" }
-local function glitch(str, chance)
-  chance = chance or 0.10
-  if math.random() > 0.55 then return str end
-  local out = {}
-  for i = 1, #str do
-    local c = str:sub(i,i)
-    if math.random() < chance and GMAP[c] then
-      table.insert(out, GMAP[c])
+function redraw()
+  screen.clear()
+  screen.aa(1)
+
+  local alb  = cur_album()
+  local song = cur_song()
+  local chords = song.chords or {}
+  local notes  = song.notes  or {}
+
+  -- ── STATUS STRIP ──────────────────────────────────────
+  screen.level(4)
+  screen.rect(0, 0, 128, 11)
+  screen.fill()
+
+  screen.font_face(7)
+  screen.font_size(8)
+  screen.level(15)
+  screen.move(2, 8)
+  screen.text("DAFT PUNK")
+
+  -- album selector boxes
+  for i = 1, #DB do
+    local bx = 128 - (#DB - i + 1) * 9
+    if i == state.album_idx then
+      screen.level(15)
+      screen.rect(bx, 1, 8, 10)
+      screen.fill()
+      screen.level(0)
     else
-      table.insert(out, c)
+      screen.level(6)
+      screen.rect(bx, 1, 8, 10)
+      screen.stroke()
+    end
+    screen.font_face(1)
+    screen.font_size(5)
+    screen.level(i == state.album_idx and 0 or 6)
+    screen.move(bx + 2, 9)
+    screen.text(tostring(i))
+  end
+
+  -- beat pulse dot (top right)
+  local beat_flash = (state.beat_phase % 4) < 2 and 12 or 4
+  screen.level(beat_flash)
+  screen.circle(120, 5, 2)
+  screen.fill()
+
+  -- ── LIVE ZONE ─────────────────────────────────────────
+  -- Song name at level 12, centered
+  screen.font_face(7)
+  screen.font_size(8)
+  screen.level(12)
+  screen.move(0, 24)
+  local title = song.title or "?"
+  if #title > 15 then title = title:sub(1,14)..".." end
+  screen.text(title)
+
+  -- Chord progression blocks
+  screen.font_face(1)
+  screen.font_size(5)
+  local chord_y = 32
+  if #chords > 0 then
+    -- current chord at level 15, others at level 8
+    -- dimming played chords to level 4
+    local chord_str = ""
+    for i, c in ipairs(chords) do
+      local sep = (i < #chords) and " " or ""
+      chord_str = chord_str .. c .. sep
+    end
+    
+    if #chord_str <= 30 then
+      screen.level(15)
+      screen.move(0, chord_y)
+      screen.text(chords[1] or "")
+      
+      local rest_str = ""
+      for i = 2, #chords do
+        rest_str = rest_str .. chords[i] .. (i < #chords and " " or "")
+      end
+      screen.level(8)
+      screen.move(0, chord_y + 8)
+      screen.text(rest_str)
+    else
+      screen.level(15)
+      screen.move(0, chord_y)
+      screen.text(chords[1] or "")
+      
+      screen.level(8)
+      screen.move(0, chord_y + 8)
+      screen.text("progression..")
+    end
+  else
+    screen.level(6)
+    screen.move(0, chord_y)
+    screen.text("-- no chords --")
+  end
+
+  -- Arp pool notes as small dots below
+  if state.arp_on and #state.arp_pool > 0 then
+    screen.level(6)
+    local dot_x = 0
+    for i, n in ipairs(state.arp_pool) do
+      if i > 16 then break end
+      screen.circle(dot_x, 48, 1)
+      screen.fill()
+      dot_x = dot_x + 7
     end
   end
-  return table.concat(out)
+
+  -- DJ transition: crossfade bar
+  if state.transition_active then
+    screen.level(10)
+    screen.rect(0, 50, 128, 4)
+    screen.stroke()
+    
+    -- source level at left, target at right, blend position
+    local blend_pos = state.transition_progress * 128
+    screen.level(15)
+    screen.rect(0, 50, blend_pos, 4)
+    screen.fill()
+  end
+
+  -- ── CONTEXT BAR ───────────────────────────────────────
+  screen.font_face(1)
+  screen.font_size(5)
+  
+  if state.arp_on then
+    screen.level(6)
+    screen.move(0, 58)
+    screen.text(ARP_STYLES[state.arp_style])
+    
+    screen.level(6)
+    screen.move(50, 58)
+    screen.text(string.format("%.0f BPM", params:get("bpm") or 120))
+    
+    screen.level(5)
+    screen.move(100, 58)
+    screen.text(#state.arp_pool.."N")
+  else
+    screen.level(6)
+    screen.move(0, 58)
+    screen.text("ARP OFF")
+  end
+
+  -- Popup system
+  if state.popup_param and state.popup_time > 0 then
+    screen.level(15)
+    screen.rect(20, 30, 90, 25)
+    screen.fill()
+    
+    screen.level(0)
+    screen.font_face(7)
+    screen.font_size(8)
+    screen.move(25, 40)
+    screen.text(state.popup_param)
+    
+    screen.font_face(1)
+    screen.font_size(6)
+    screen.move(25, 50)
+    screen.text(tostring(state.popup_val))
+    
+    state.popup_time = state.popup_time - 1
+  end
+
+  screen.update()
 end
 
 -- ============================================================
@@ -495,156 +650,6 @@ local function grid_redraw()
 end
 
 -- ============================================================
---  SCREEN REDRAW
--- ============================================================
-function redraw()
-  screen.clear()
-  screen.aa(0)
-
-  local alb  = cur_album()
-  local song = cur_song()
-  local chords = song.chords or {}
-  local notes  = song.notes  or {}
-
-  -- ── Header block ─────────────────────────────────────
-  screen.level(2)
-  screen.rect(0, 0, 128, 12)
-  screen.fill()
-
-  screen.font_face(7)
-  screen.font_size(8)
-  screen.level(15)
-  screen.move(2, 9)
-  screen.text(glitch(\"DAFT PUNK\", 0.14))
-
-  -- album selector boxes (4 albums)
-  for i = 1, #DB do
-    local bx = 128 - (#DB - i + 1) * 9
-    if i == state.album_idx then
-      screen.level(15)
-      screen.rect(bx, 1, 8, 10)
-      screen.fill()
-      screen.level(0)
-    else
-      screen.level(4)
-      screen.rect(bx, 1, 8, 10)
-      screen.stroke()
-    end
-    screen.font_face(1)
-    screen.font_size(5)
-    screen.move(bx + 2, 9)
-    screen.text(tostring(i))
-    screen.level(i == state.album_idx and 0 or 4)
-  end
-
-  -- ── Album name ───────────────────────────────────────
-  screen.font_face(7)
-  screen.font_size(6)
-  screen.level(8)
-  screen.move(0, 22)
-  screen.text(glitch(alb.album, 0.07))
-
-  screen.font_face(1)
-  screen.font_size(5)
-  screen.level(4)
-  screen.move(108, 22)
-  screen.text(tostring(alb.year))
-
-  -- ── Song title ───────────────────────────────────────
-  screen.font_face(7)
-  screen.font_size(8)
-  screen.level(15)
-  screen.move(0, 34)
-  local title = song.title or \"?\"
-  if #title > 15 then title = title:sub(1,14)..\"..\" end
-  screen.text(glitch(title, 0.04))
-
-  -- song counter + scrollbar
-  screen.font_face(1)
-  screen.font_size(5)
-  screen.level(4)
-  screen.move(0, 43)
-  screen.text(string.format(\"%02d / %02d\", state.song_idx, #alb.songs))
-
-  -- scrollbar (right edge, rows 12-54)
-  local total = #alb.songs
-  local bar_h = math.max(3, math.floor(42 / total))
-  local bar_y = 12 + math.floor(42 * (state.song_idx-1) / math.max(total-1, 1))
-  screen.level(2)
-  screen.rect(125, 12, 3, 42)
-  screen.fill()
-  screen.level(12)
-  screen.rect(125, bar_y, 3, bar_h)
-  screen.fill()
-
-  -- ── Chord strip ──────────────────────────────────────
-  screen.font_face(1)
-  screen.font_size(5)
-  screen.level(5)
-  screen.move(0, 52)
-  local cs = \"\"
-  for i, c in ipairs(chords) do
-    local tok = c .. (i < #chords and \" \" or \"\")
-    if #cs + #tok > 20 then cs = cs .. \"..\"; break end
-    cs = cs .. tok
-  end
-  screen.text(cs ~= \"\" and cs or \"-- no chords --\")
-
-  -- ── Note strip ───────────────────────────────────────
-  screen.level(3)
-  screen.move(0, 60)
-  local ns = \"\"
-  for i, pc in ipairs(notes) do
-    local tok = (NOTE_NAMES[pc+1] or \"?\") .. (i < #notes and \" \" or \"\")
-    if #ns + #tok > 20 then ns = ns .. \"..\"; break end
-    ns = ns .. tok
-  end
-  screen.text(ns)
-
-  -- ── Bottom status bar ─────────────────────────────────
-  if state.arp_on then
-    screen.level(13)
-    screen.rect(0, 55, 128, 9)
-    screen.fill()
-    screen.level(0)
-    screen.font_face(7)
-    screen.font_size(6)
-    screen.move(2, 63)
-    screen.text(glitch(\"ARP:\"..ARP_STYLES[state.arp_style], 0.13))
-    -- div
-    screen.font_face(1)
-    screen.font_size(5)
-    screen.move(60, 63)
-    screen.text(ARP_DIV_NAMES[state.arp_div_idx])
-    -- pool count + NEW warning
-    screen.move(90, 63)
-    if #state.arp_pool >= ARP_MAX then
-      screen.level(15)
-      screen.text(#state.arp_pool..\"N FULL!\")
-    else
-      screen.level(0)
-      screen.text(#state.arp_pool..\"N\")
-    end
-    -- octave
-    screen.move(112, 63)
-    screen.text(\"O\"..state.octave)
-  else
-    screen.level(3)
-    screen.font_face(1)
-    screen.font_size(5)
-    screen.move(0, 63)
-    if state.transition_active then
-      screen.level(13)
-      screen.text(\"TRANSITION: \"..string.format(\"%.0f\", state.transition_progress*100)..\"% K1+K3 OFF\")
-    else
-      screen.text(\"ARP OFF  OCT:\"..state.octave..\"  K2=ON\")
-    end
-  end
-
-  screen.update()
-end
-
--- ============================================================
 --  DIRECT PLAY (arp off)
 -- ============================================================
 local function direct_play_from_held()
@@ -660,7 +665,7 @@ local function direct_play_from_held()
         for row = 1, 8 do
           if rm[row] then
             if col <= CHORD_COLS then
-              for _, n in ipairs(chord_to_midi(chords[col] or \"\", state.octave)) do
+              for _, n in ipairs(chord_to_midi(chords[col] or "", state.octave)) do
                 sound_on(n)
               end
             elseif col >= NOTE_COL_START then
@@ -711,6 +716,9 @@ function enc(n, d)
       state.held      = {}
       rebuild_pool()
       silence_all()
+      state.popup_param = "ALBUM"
+      state.popup_val = state.album_idx
+      state.popup_time = 20
     end
 
   elseif n == 2 then
@@ -720,13 +728,22 @@ function enc(n, d)
       state.held     = {}
       rebuild_pool()
       silence_all()
+      state.popup_param = "SONG"
+      state.popup_val = state.song_idx
+      state.popup_time = 20
     end
 
   elseif n == 3 then
     if state.arp_on then
       state.arp_div_idx = clamp(state.arp_div_idx - d, 1, #ARP_DIVS)
+      state.popup_param = "DIV"
+      state.popup_val = ARP_DIV_NAMES[state.arp_div_idx]
+      state.popup_time = 20
     else
       state.octave = clamp(state.octave + d, 2, 7)
+      state.popup_param = "OCT"
+      state.popup_val = state.octave
+      state.popup_time = 20
     end
   end
 
@@ -763,6 +780,9 @@ function key(n, z)
       -- K3 alone: cycle arp style
       state.arp_style = (state.arp_style % #ARP_STYLES) + 1
       state.arp_step  = 1
+      state.popup_param = "ARP"
+      state.popup_val = ARP_STYLES[state.arp_style]
+      state.popup_time = 20
       redraw()
     end
   elseif n == 1 and z == 0 then
@@ -774,52 +794,57 @@ end
 --  PARAMS
 -- ============================================================
 local function setup_params()
-  params:add_separator(\"DAFT PUNK ANATOMY ENHANCED\")
+  params:add_separator("DAFT PUNK ANATOMY ENHANCED")
 
-  params:add_separator(\"synth\")
+  params:add_separator("synth")
   params:add{
-    type=\"control\", id=\"amp\", name=\"Amp\",
-    controlspec=controlspec.new(0, 1, \"lin\", 0.01, 0.75, \"\"),
+    type="control", id="amp", name="Amp",
+    controlspec=controlspec.new(0, 1, "lin", 0.01, 0.75, ""),
     action=function(v) engine.amp(v) end
   }
   params:add{
-    type=\"control\", id=\"attack\", name=\"Attack\",
-    controlspec=controlspec.new(0.001, 2, \"exp\", 0.001, 0.005, \"s\"),
+    type="control", id="attack", name="Attack",
+    controlspec=controlspec.new(0.001, 2, "exp", 0.001, 0.005, "s"),
     action=function(v) engine.attack(v) end
   }
   params:add{
-    type=\"control\", id=\"release\", name=\"Release\",
-    controlspec=controlspec.new(0.01, 8, \"exp\", 0.01, 0.9, \"s\"),
+    type="control", id="release", name="Release",
+    controlspec=controlspec.new(0.01, 8, "exp", 0.01, 0.9, "s"),
     action=function(v) engine.release(v) end
   }
   params:add{
-    type=\"control\", id=\"cutoff\", name=\"Cutoff\",
-    controlspec=controlspec.new(100, 8000, \"exp\", 1, 2800, \"hz\"),
+    type="control", id="cutoff", name="Cutoff",
+    controlspec=controlspec.new(100, 8000, "exp", 1, 2800, "hz"),
     action=function(v) engine.cutoff(v) end
   }
   params:add{
-    type=\"control\", id=\"resonance\", name=\"Resonance\",
-    controlspec=controlspec.new(0, 1, \"lin\", 0.01, 0.15, \"\"),
+    type="control", id="resonance", name="Resonance",
+    controlspec=controlspec.new(0, 1, "lin", 0.01, 0.15, ""),
     action=function(v) engine.resonance(v) end
   }
   params:add{
-    type=\"number\", id=\"wave_shape\", name=\"Wave Shape\",
+    type="number", id="wave_shape", name="Wave Shape",
     min=0, max=3, default=1,
     action=function(v) engine.wave_shape(v) end
   }
-
-  params:add_separator(\"MIDI out\")
   params:add{
-    type=\"number\", id=\"midi_out_device\", name=\"MIDI Device\",
+    type="control", id="bpm", name="BPM",
+    controlspec=controlspec.new(40, 200, "lin", 1, 120, ""),
+    action=function(v) end
+  }
+
+  params:add_separator("MIDI out")
+  params:add{
+    type="number", id="midi_out_device", name="MIDI Device",
     min=1, max=4, default=1,
     action=function(v) midi_out = midi.connect(v) end
   }
   params:add{
-    type=\"number\", id=\"midi_ch\", name=\"MIDI Channel\",
+    type="number", id="midi_ch", name="MIDI Channel",
     min=1, max=16, default=1
   }
   params:add{
-    type=\"number\", id=\"velocity\", name=\"Velocity\",
+    type="number", id="velocity", name="Velocity",
     min=1, max=127, default=90
   }
 
@@ -839,15 +864,17 @@ function init()
 
   g.key = on_grid_key
 
-  -- Animation + pool full warning
+  -- Screen update loop for beat_phase and popup timers
   clock.run(function()
     while true do
+      state.beat_phase = (state.beat_phase + 1) % 4
+      state.screen_clock_counter = state.screen_clock_counter + 1
       if state.pool_full_flash > 0 then
         state.pool_full_flash = state.pool_full_flash - 1
       end
       redraw()
       grid_redraw()
-      clock.sleep(1/20)
+      clock.sleep(1/10)  -- ~10fps
     end
   end)
 
